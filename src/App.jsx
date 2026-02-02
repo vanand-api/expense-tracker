@@ -19,7 +19,16 @@ function formatCurrency(value) {
 }
 
 function formatDate(dateString) {
-  const date = new Date(dateString)
+  /*const date = new Date(dateString)
+  return date.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    year: 'numeric' 
+  })*/
+
+    const [year, month, day] = dateString.split('-')
+  const date = new Date(year, month - 1, day) // local date, no timezone shift
+
   return date.toLocaleDateString('en-US', { 
     month: 'short', 
     day: 'numeric', 
@@ -376,7 +385,7 @@ function App() {
             <div className="h-9 w-9 rounded-xl bg-slate-900 text-white grid place-content-center">$
             </div>
             <div>
-              <h1 className="text-lg font-semibold">Expense Tracker</h1>
+              <h1 className="text-lg font-semibold">Expense Trackers</h1>
               <p className="text-xs text-slate-500">Track, filter, and edit your spending</p>
             </div>
           </div>
