@@ -385,7 +385,7 @@ function App() {
             <div className="h-9 w-9 rounded-xl bg-slate-900 text-white grid place-content-center">$
             </div>
             <div>
-              <h1 className="text-lg font-semibold">Expense Tracker</h1>
+              <h1 className="text-lg font-semibold">Expense Trackers</h1>
               <p className="text-xs text-slate-500">Track, filter, and edit your spending</p>
             </div>
           </div>
