@@ -19,7 +19,16 @@ function formatCurrency(value) {
 }
 
 function formatDate(dateString) {
-  const date = new Date(dateString)
+  /*const date = new Date(dateString)
+  return date.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    year: 'numeric' 
+  })*/
+
+    const [year, month, day] = dateString.split('-')
+  const date = new Date(year, month - 1, day) // local date, no timezone shift
+
   return date.toLocaleDateString('en-US', { 
     month: 'short', 
     day: 'numeric', 
