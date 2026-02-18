@@ -18,34 +18,22 @@ function formatCurrency(value) {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(value)
 }
 
-// ✅ Parse YYYY-MM-DD as a local date (prevents timezone day-shift)
-function parseLocalDate(dateString) {
-  if (!dateString || typeof dateString !== 'string') return null
-  const [y, m, d] = dateString.split('-').map(Number)
-  if (!y || !m || !d) return null
-  return new Date(y, m - 1, d)
-}
-
 function formatDate(dateString) {
-  const date = parseLocalDate(dateString)
-  if (!date) return ''
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
+  /*const date = new Date(dateString)
+  return date.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    year: 'numeric' 
+  })*/
 
-// ✅ Ensure timestamps are always ISO-ish and not plain YYYY-MM-DD
-function safeTimestamp(expenseDateLike) {
-  // Use local noon to avoid timezone/DST edge shifts
-  if (expenseDateLike && typeof expenseDateLike === 'string') {
-    // if already has time, keep it
-    if (expenseDateLike.includes('T')) return expenseDateLike
-    // if it's YYYY-MM-DD, add local noon
-    if (/^\d{4}-\d{2}-\d{2}$/.test(expenseDateLike)) return `${expenseDateLike}T12:00:00`
-  }
-  return new Date().toISOString()
+    const [year, month, day] = dateString.split('-')
+  const date = new Date(year, month - 1, day) // local date, no timezone shift
+
+  return date.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    year: 'numeric' 
+  })
 }
 
 function App() {
@@ -66,32 +54,21 @@ function App() {
       try {
         setLoading(true)
         const response = await getAllExpenses()
-
+        //console.log(response.data)
+        // Map backend data to frontend format with validation
         const mappedExpenses = response.data
-          .filter(expense => expense && expense.id)
-          .map(expense => {
-            const dateOnly = expense.expenseDate
-              ? String(expense.expenseDate).split('T')[0]
-              : new Date().toISOString().slice(0, 10)
-
-            // ✅ timestamp fallback should never be plain YYYY-MM-DD
-            const ts =
-              expense.timestamp ||
-              expense.timeStamp ||
-              (expense.expenseDate ? safeTimestamp(String(expense.expenseDate)) : new Date().toISOString())
-
-            return {
-              id: expense.id,
-              title: expense.title || 'Untitled',
-              category: expense.category || 'General',
-              amount: Number(expense.amount) || 0,
-              date: dateOnly,
-              timestamp: ts,
-              note: expense.note || '',
-            }
-          })
-          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-
+          .filter(expense => expense && expense.id) // Filter out invalid expenses
+          .map(expense => ({
+            id: expense.id,
+            title: expense.title || 'Untitled',
+            category: expense.category || 'General',
+            amount: Number(expense.amount) || 0,
+            date: expense.expenseDate ? expense.expenseDate.split('T')[0] : new Date().toISOString().slice(0, 10),
+            timestamp: expense.timestamp || expense.timeStamp || expense.expenseDate || new Date().toISOString(), // Use backend timestamp field
+            note: expense.note || ''
+          }))
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) // Sort by timestamp descending (most recent first)
+        //console.log('Mapped expenses:', mappedExpenses)
         setExpenses(mappedExpenses)
         setError(null)
       } catch (err) {
@@ -102,50 +79,51 @@ function App() {
         setLoading(false)
       }
     }
-
+    
     fetchExpenses()
   }, [])
 
   const filteredExpenses = useMemo(() => {
     const q = filter.trim().toLowerCase()
     let filtered = expenses
-
-    // ✅ Filter by selected month using local-date parsing (no timezone shift)
+    
+    //console.log('All expenses:', expenses)
+    //console.log('Selected month:', selectedMonth)
+    
+    // Filter by selected month using expenseDate
     if (selectedMonth) {
       filtered = filtered.filter(e => {
         if (!e.date) return false
-        const d = parseLocalDate(e.date)
-        if (!d) return false
+        const d = new Date(e.date)
         const year = d.getFullYear()
         const month = String(d.getMonth() + 1).padStart(2, '0')
         const monthKey = `${year}-${month}`
+        //console.log(`Expense ${e.title} date: ${e.date}, monthKey: ${monthKey}, selectedMonth: ${selectedMonth}`)
         return monthKey === selectedMonth
       })
     }
-
+    
+    // Filter by search query
     if (q) {
       filtered = filtered.filter(e =>
         e.title.toLowerCase().includes(q) ||
         e.category.toLowerCase().includes(q) ||
-        (e.note || '').toLowerCase().includes(q)
+        e.note.toLowerCase().includes(q)
       )
     }
-
+    
+//    console.log('Filtered expenses:', filtered)
     return filtered
   }, [filter, expenses, selectedMonth])
 
-  const total = useMemo(
-    () => filteredExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0),
-    [filteredExpenses]
-  )
+  const total = useMemo(() => filteredExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0), [filteredExpenses])
 
-  // ✅ Available months: also use local-date parsing
+  // Get available months for dropdown using expenseDate
   const availableMonths = useMemo(() => {
     const months = new Set()
     for (const e of expenses) {
       if (e.date) {
-        const d = parseLocalDate(e.date)
-        if (!d) continue
+        const d = new Date(e.date)
         const year = d.getFullYear()
         const month = String(d.getMonth() + 1).padStart(2, '0')
         months.add(`${year}-${month}`)
@@ -153,6 +131,9 @@ function App() {
     }
     return Array.from(months).sort().reverse()
   }, [expenses])
+
+
+
 
   // Aggregations for charts
   const categoryAgg = useMemo(() => {
@@ -177,207 +158,188 @@ function App() {
     return { labels, data }
   }, [filteredExpenses])
 
-  const pieData = useMemo(
-    () => ({
-      labels: categoryAgg.labels,
-      datasets: [
-        {
-          data: categoryAgg.data,
-          backgroundColor: ['#0ea5e9', '#22c55e', '#f97316', '#a78bfa', '#ef4444', '#14b8a6', '#f59e0b'],
-          borderColor: '#ffffff',
-          borderWidth: 2,
-        },
-      ],
-    }),
-    [categoryAgg]
-  )
-
-  const pieOptions = useMemo(
-    () => ({
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            boxWidth: 12,
-            padding: 10,
-            font: { size: 11 },
-          },
-        },
+  const pieData = useMemo(() => ({
+    labels: categoryAgg.labels,
+    datasets: [
+      {
+        data: categoryAgg.data,
+        backgroundColor: ['#0ea5e9', '#22c55e', '#f97316', '#a78bfa', '#ef4444', '#14b8a6', '#f59e0b'],
+        borderColor: '#ffffff',
+        borderWidth: 2,
       },
-      responsive: true,
-      maintainAspectRatio: false,
-      layout: { padding: 10 },
-    }),
-    []
-  )
+    ],
+  }), [categoryAgg])
 
-  const barData = useMemo(
-    () => ({
-      labels: byDateAgg.labels,
-      datasets: [
-        {
-          label: 'Amount',
-          data: byDateAgg.data,
-          backgroundColor: 'rgba(15, 23, 42, 0.7)',
-          borderRadius: 8,
-        },
-      ],
-    }),
-    [byDateAgg]
-  )
+  const pieOptions = useMemo(() => ({
+    plugins: { 
+      legend: { 
+        position: 'bottom',
+        labels: {
+          boxWidth: 12,
+          padding: 10,
+          font: { size: 11 }
+        }
+      } 
+    },
+    responsive: true,
+    maintainAspectRatio: false,
+    layout: {
+      padding: 10
+    }
+  }), [])
 
-  const barOptions = useMemo(
-    () => ({
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          titleFont: { size: 12 },
-          bodyFont: { size: 11 },
-        },
+  const barData = useMemo(() => ({
+    labels: byDateAgg.labels,
+    datasets: [
+      {
+        label: 'Amount',
+        data: byDateAgg.data,
+        backgroundColor: 'rgba(15, 23, 42, 0.7)',
+        borderRadius: 8,
       },
-      scales: {
-        x: {
-          grid: { display: false },
-          ticks: {
-            font: { size: 10 },
-            maxRotation: 45,
-            minRotation: 0,
-          },
-        },
-        y: {
-          grid: { color: 'rgba(148,163,184,0.2)' },
-          ticks: { font: { size: 10 } },
-        },
+    ],
+  }), [byDateAgg])
+
+  const barOptions = useMemo(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { 
+      legend: { display: false },
+      tooltip: {
+        titleFont: { size: 12 },
+        bodyFont: { size: 11 }
+      }
+    },
+    scales: {
+      x: { 
+        grid: { display: false },
+        ticks: { 
+          font: { size: 10 },
+          maxRotation: 45,
+          minRotation: 0
+        }
       },
-      layout: { padding: 10 },
-    }),
-    []
-  )
+      y: { 
+        grid: { color: 'rgba(148,163,184,0.2)' },
+        ticks: { font: { size: 10 } }
+      },
+    },
+    layout: {
+      padding: 10
+    }
+  }), [])
 
   function handleAdd(newExpense) {
     const addExpenseToBackend = async () => {
       try {
+        // Prepare the data to send to backend
         const dataToSend = {
           title: newExpense.title,
           category: newExpense.category,
           amount: newExpense.amount,
           note: newExpense.note,
-          expenseDate: newExpense.date,
+          expenseDate: newExpense.date // Send date as expenseDate to match backend DTO
         }
-
+        //console.log('Sending to backend:', dataToSend)
+        
         const response = await addExpense(dataToSend)
-
+        //console.log('Add expense response:', response.data)
+        //console.log('Backend timestamp:', response.data?.timestamp)
+        //console.log('Backend timeStamp:', response.data?.timeStamp)
+        //console.log('Using timestamp:', response.data.timestamp || response.data.timeStamp || new Date().toISOString())
+        
+        // If backend returns the expense data, use it; otherwise refetch all expenses
         if (response.data && typeof response.data === 'object' && (response.data.id || response.data.expenseId)) {
-          const dateOnly = response.data.expenseDate
-            ? String(response.data.expenseDate).split('T')[0]
-            : newExpense.date
-
-          const ts =
-            response.data.timestamp ||
-            response.data.timeStamp ||
-            (response.data.expenseDate ? safeTimestamp(String(response.data.expenseDate)) : safeTimestamp(dateOnly))
-
+          // Response contains the expense object
           const mappedExpense = {
             id: response.data.id || response.data.expenseId,
             title: response.data.title || newExpense.title,
             category: response.data.category || newExpense.category,
             amount: Number(response.data.amount) || newExpense.amount,
-            date: dateOnly,
-            timestamp: ts,
-            note: response.data.note || newExpense.note,
+            date: response.data.expenseDate ? response.data.expenseDate.split('T')[0] : newExpense.date,
+            timestamp: response.data.timestamp || response.data.timeStamp || new Date().toISOString(), // Use backend timestamp field
+            note: response.data.note || newExpense.note
           }
-
+          //console.log('Mapped expense:', mappedExpense)
           setExpenses(prev => {
             const updated = [mappedExpense, ...prev]
-            return updated.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+            const sorted = updated.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) // Sort by timestamp descending
+            console.log('Sorted expenses after add:', sorted.map(e => ({ title: e.title, timestamp: e.timestamp })))
+            return sorted
           })
         } else {
+          // Backend didn't return expense data, refetch all expenses to get the correct IDs
+          console.log('Backend response doesn\'t contain expense data, refetching all expenses...')
           const allExpensesResponse = await getAllExpenses()
           const mappedExpenses = allExpensesResponse.data
             .filter(expense => expense && expense.id)
-            .map(expense => {
-              const dateOnly = expense.expenseDate
-                ? String(expense.expenseDate).split('T')[0]
-                : new Date().toISOString().slice(0, 10)
-              const ts =
-                expense.timestamp ||
-                expense.timeStamp ||
-                (expense.expenseDate ? safeTimestamp(String(expense.expenseDate)) : safeTimestamp(dateOnly))
-              return {
-                id: expense.id,
-                title: expense.title || 'Untitled',
-                category: expense.category || 'General',
-                amount: Number(expense.amount) || 0,
-                date: dateOnly,
-                timestamp: ts,
-                note: expense.note || '',
-              }
-            })
-            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+            .map(expense => ({
+              id: expense.id,
+              title: expense.title || 'Untitled',
+              category: expense.category || 'General',
+              amount: Number(expense.amount) || 0,
+              date: expense.expenseDate ? expense.expenseDate.split('T')[0] : new Date().toISOString().slice(0, 10),
+              timestamp: expense.timestamp || expense.timeStamp || expense.expenseDate || new Date().toISOString(), // Use backend timestamp field
+              note: expense.note || ''
+            }))
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) // Sort by timestamp descending (most recent first)
           setExpenses(mappedExpenses)
         }
-
         setError(null)
       } catch (err) {
         console.error('Failed to add expense:', err)
         setError('Failed to add expense. Please try again.')
       }
     }
-
     addExpenseToBackend()
   }
 
   function handleUpdate(id, updated) {
     const updateExpenseInBackend = async () => {
       try {
+        // Prepare the data to send to backend
         const dataToSend = {
-          id: parseInt(id, 10),
+          id: parseInt(id), // Ensure ID is an integer
           title: updated.title,
           category: updated.category,
           amount: updated.amount,
           note: updated.note,
-          expenseDate: updated.date,
+          expenseDate: updated.date // Send date as expenseDate to match backend DTO
         }
-
+        //console.log('Sending to backend:', dataToSend)
+        
         const response = await updateExpense(id, dataToSend)
-
+        //console.log('Update response:', response.data)
+        
+        // Check if response.data is the actual expense object or just a success message
         let mappedExpense
         if (response.data && typeof response.data === 'object' && response.data.id) {
-          const dateOnly = response.data.expenseDate
-            ? String(response.data.expenseDate).split('T')[0]
-            : updated.date
-
-          const ts =
-            response.data.timestamp ||
-            response.data.timeStamp ||
-            (response.data.expenseDate ? safeTimestamp(String(response.data.expenseDate)) : safeTimestamp(dateOnly))
-
+          // Response contains the updated expense object
           mappedExpense = {
             id: response.data.id,
             title: response.data.title || updated.title,
             category: response.data.category || updated.category,
             amount: Number(response.data.amount) || updated.amount,
-            date: dateOnly,
-            timestamp: ts,
-            note: response.data.note || updated.note,
+            date: response.data.expenseDate ? response.data.expenseDate.split('T')[0] : updated.date,
+            timestamp: response.data.timestamp || response.data.timeStamp || response.data.expenseDate || new Date().toISOString(), // Use backend timestamp field
+            note: response.data.note || updated.note
           }
         } else {
+          // Response is just a success message, use the updated data we sent
           mappedExpense = {
-            id,
+            id: id,
             title: updated.title,
             category: updated.category,
             amount: updated.amount,
             date: updated.date,
-            timestamp: safeTimestamp(updated.date),
-            note: updated.note,
+            timestamp: new Date().toISOString(), // Use current time for updated expense
+            note: updated.note
           }
         }
-
+        
         setExpenses(prev => {
-          const upd = prev.map(e => (e.id === id ? mappedExpense : e))
-          return upd.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+          const updated = prev.map(e => (e.id === id ? mappedExpense : e))
+          return updated.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) // Maintain sort order
         })
         setEditingId(null)
         setError(null)
@@ -388,7 +350,6 @@ function App() {
         setError(`Failed to update expense: ${err.response?.data || err.message}`)
       }
     }
-
     updateExpenseInBackend()
   }
 
@@ -403,7 +364,6 @@ function App() {
         setError('Failed to delete expense. Please try again.')
       }
     }
-
     deleteExpenseFromBackend()
   }
 
@@ -418,11 +378,12 @@ function App() {
           </div>
         </div>
       )}
-
+      
       <header className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-white/60 bg-white/80 border-b border-slate-200">
         <div className="mx-auto max-w-6xl px-4 py-4">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-slate-900 text-white grid place-content-center">$</div>
+            <div className="h-9 w-9 rounded-xl bg-slate-900 text-white grid place-content-center">$
+            </div>
             <div>
               <h1 className="text-lg font-semibold">Expense Trackers</h1>
               <p className="text-xs text-slate-500">Track, filter, and edit your spending</p>
@@ -447,7 +408,7 @@ function App() {
               >
                 {availableMonths.map(month => {
                   const [year, monthNum] = month.split('-')
-                  const date = new Date(Number(year), Number(monthNum) - 1)
+                  const date = new Date(year, monthNum - 1)
                   const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
                   return (
                     <option key={month} value={month}>
@@ -564,7 +525,9 @@ function App() {
         </div>
       </section>
 
-      <footer className="py-8 text-center text-xs text-slate-500">© All Copyrights Reserved</footer>
+      <footer className="py-8 text-center text-xs text-slate-500">
+        © All Copyrights Reserved
+      </footer>
     </div>
   )
 }
@@ -599,12 +562,14 @@ function ExpenseForm({ onSubmit, initial }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="label">Category</label>
-          <select className="input mt-1" value={category} onChange={e => setCategory(e.target.value)}>
+          <select 
+            className="input mt-1" 
+            value={category} 
+            onChange={e => setCategory(e.target.value)}
+          >
             <option value="">Select category</option>
             {commonCategories.map(cat => (
-              <option key={cat} value={cat}>
-                {cat}
-              </option>
+              <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
         </div>
@@ -624,9 +589,7 @@ function ExpenseForm({ onSubmit, initial }) {
         </div>
       </div>
       <div className="pt-2">
-        <button type="submit" className="btn btn-primary w-full">
-          Add Expense
-        </button>
+        <button type="submit" className="btn btn-primary w-full">Add Expense</button>
       </div>
     </form>
   )
@@ -658,19 +621,27 @@ function ExpenseRow({ expense, isEditing, onEdit, onCancelEdit, onSave, onDelete
               <div className="mt-0.5 text-xs text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span>{formatDate(expense.date)}</span>
                 <span className="text-slate-300">•</span>
-                <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 text-xs">
-                  {expense.category}
-                </span>
+                <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 text-xs">{expense.category}</span>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <div className="text-base font-semibold tabular-nums">{formatCurrency(expense.amount)}</div>
-              <button className="btn btn-ghost" onClick={onEdit} aria-label="Edit" title="Edit">
+              <button
+                className="btn btn-ghost"
+                onClick={onEdit}
+                aria-label="Edit"
+                title="Edit"
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487a2.126 2.126 0 1 1 3.006 3.006L8.75 18.61l-4.5 1.125 1.125-4.5 11.487-10.748z" />
                 </svg>
               </button>
-              <button className="btn btn-ghost text-red-600 hover:bg-red-50" onClick={onDelete} aria-label="Delete" title="Delete">
+              <button
+                className="btn btn-ghost text-red-600 hover:bg-red-50"
+                onClick={onDelete}
+                aria-label="Delete"
+                title="Delete"
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18" />
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
@@ -679,7 +650,14 @@ function ExpenseRow({ expense, isEditing, onEdit, onCancelEdit, onSave, onDelete
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
                 </svg>
               </button>
-              <button className="btn btn-ghost" onClick={() => setShowNotes(s => !s)} aria-expanded={showNotes} aria-controls={`note-${expense.id}`} aria-label={showNotes ? 'Hide notes' : 'Show notes'} title={showNotes ? 'Hide notes' : 'Show notes'}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setShowNotes(s => !s)}
+                aria-expanded={showNotes}
+                aria-controls={`note-${expense.id}`}
+                aria-label={showNotes ? 'Hide notes' : 'Show notes'}
+                title={showNotes ? 'Hide notes' : 'Show notes'}
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={`h-5 w-5 transition-transform ${showNotes ? 'rotate-180' : ''}`}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
                 </svg>
@@ -687,7 +665,9 @@ function ExpenseRow({ expense, isEditing, onEdit, onCancelEdit, onSave, onDelete
             </div>
           </div>
 
-          {expense.note && showNotes && <div id={`note-${expense.id}`} className="mt-1 text-sm text-slate-600">{expense.note}</div>}
+          {expense.note && showNotes && (
+            <div id={`note-${expense.id}`} className="mt-1 text-sm text-slate-600">{expense.note}</div>
+          )}
         </div>
       ) : (
         <div className="grid gap-3">
@@ -695,10 +675,8 @@ function ExpenseRow({ expense, isEditing, onEdit, onCancelEdit, onSave, onDelete
             <input className="input md:col-span-2" value={form.title} onChange={e => handleChange('title', e.target.value)} />
             <select className="input" value={form.category} onChange={e => handleChange('category', e.target.value)}>
               <option value="">Select category</option>
-              {['Food', 'Skincare', 'Gym', 'Rent', 'Mobile Bill', 'Family', 'Movies', 'Shopping', 'Travel', 'Healthcare', 'Education', 'Entertainment', 'Other'].map(cat => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
+              {['Food', 'Skincare', 'Gym', 'Rent', 'Mobile Bill','Family','Movies', 'Shopping', 'Travel', 'Healthcare', 'Education', 'Entertainment', 'Other'].map(cat => (
+                <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
             <input type="number" step="0.01" className="input" value={form.amount} onChange={e => handleChange('amount', e.target.value)} />
@@ -706,12 +684,8 @@ function ExpenseRow({ expense, isEditing, onEdit, onCancelEdit, onSave, onDelete
           </div>
           <input className="input" value={form.note} onChange={e => handleChange('note', e.target.value)} placeholder="Note" />
           <div className="flex items-center justify-end gap-2">
-            <button className="btn btn-ghost" onClick={onCancelEdit}>
-              Cancel
-            </button>
-            <button className="btn btn-primary" onClick={handleSave}>
-              Save
-            </button>
+            <button className="btn btn-ghost" onClick={onCancelEdit}>Cancel</button>
+            <button className="btn btn-primary" onClick={handleSave}>Save</button>
           </div>
         </div>
       )}
@@ -720,3 +694,5 @@ function ExpenseRow({ expense, isEditing, onEdit, onCancelEdit, onSave, onDelete
 }
 
 export default App
+
+
