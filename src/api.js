@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-const BASE_URL = 'http://localhost:8080/api/';
-//const BASE_URL = 'https://expensetracker-microservice.onrender.com/api/';
+//const BASE_URL = 'http://localhost:8080/api/';
+const BASE_URL = 'https://expensetracker-microservice.onrender.com/api/';
 // API functions
 export const getAllExpenses = () => axios.get(BASE_URL + 'getExpenses');
 
